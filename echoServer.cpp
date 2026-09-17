@@ -3,6 +3,29 @@
 #include<unistd.h> //UNIX STD (For POSIX System Calls)
 #include<arpa/inet.h> //sockaddr
 
+bool send_all(int socket_fd, const char* data, size_t total_bytes) {
+    size_t bytes_sent = 0;
+    while(bytes_sent < total_bytes) {
+        ssize_t result = write(socket_fd, data + bytes_sent, total_bytes - bytes_sent);
+        if(result < 0) {
+            if(errno == EINTR) {
+                //Interrupted by OS signal; retry.
+                continue;
+            }
+            //Unrecoverable
+            return false;
+        }
+
+        if(result == 0) {
+            //Peer closed the connection
+            return false;
+        }
+
+        bytes_sent += static_cast<size_t>(result);
+    }
+    return true;
+}
+
 int main() {
     int server_fd = socket( //fd(file descriptor) because everythin is file in UNIX/LINUX. Network socket is file. Therefore, operators like read, write, open, close.
         AF_INET, //IPv4 
@@ -13,7 +36,7 @@ int main() {
         return 1;
     }
     int enable = 1;
-    if(setsockopt(server_fd, SOL_SOCKET,SO_REUSEADDR, &enable, sizeof(enable) < 0)) { //Incase program is closed and kernel is still waiting for final FIN or something and IP address is still in use.
+    if(setsockopt(server_fd, SOL_SOCKET,SO_REUSEADDR, &enable, sizeof(enable)) < 0) { //Incase program is closed and kernel is still waiting for final FIN or something and IP address is still in use.
         perror("Address already in use.");
         close(server_fd);
         return 1;
@@ -62,7 +85,11 @@ int main() {
                 break;
             }
             //CHECK WRITE NOTES PDF
-            write(client_fd, buffer, bytes_read);
+            // Guaranteed to write all 'bytes_read' bytes even under buffer pressure
+            if (!send_all(client_fd, buffer, bytes_read)) {
+                std::cerr << "Failed to send full buffer to client.\n";
+                break;
+            }
         }
         std::cout << "Client Discconnected.\n";
         close(client_fd);
